@@ -1,0 +1,212 @@
+
+## Updated Simulation ##
+
+
+```{r}
+library(rstan)
+library(updog)
+```
+
+```{r}
+vbmodel <- rstan::stan_model(file = "./vargeno.stan", )
+```
+
+```{r}
+get_maxgeno <- function(postprobmat) {
+  apply(postprobmat, 1, which.max) - 1
+}
+```
+
+```{r}
+lgeno <- function(x) {
+  postprobmat <- matrix(summary(x, pars = "logpostprobmat")$summary[, "mean"], ncol = ploidy + 1, byrow = TRUE)
+  rowmax <- apply(postprobmat, 1, max)
+  postprobmat <- postprobmat - rowmax
+  postprobmat <- exp(postprobmat - log(rowSums(exp(postprobmat))))
+  return(postprobmat)
+}
+```
+
+
+**Simulate the dataframe**
+```{r}
+itermax <- 100
+bias_vec <- c(1)
+seq_vec  <- 0.01
+od_vec   <- c(0)
+itervec  <- seq_len(itermax)
+ploidy_vec <- 6
+allele_vec <- c(0.5, 0.9)
+nsamp_vec <- c(30)
+recount_vec <- c(100)
+paramdf <- expand.grid(bias = bias_vec,
+                       seq = seq_vec, 
+                       od = od_vec, 
+                       iter = itervec, 
+                       allele = allele_vec, 
+                       nsamp = nsamp_vec, 
+                       recount = recount_vec, 
+                       ploidy = ploidy_vec)
+```
+
+```{r}
+paramdf
+```
+
+**Simulate data from extracting the index from the dataframe**
+```{r}
+simulate = function(item) {
+  
+    current_bias = paramdf[item, "bias"]
+    current_seq = paramdf[item, "seq"]
+    current_od = paramdf[item, "od"]
+    current_allele = paramdf[item, "allele"]
+    nsamp = paramdf[item, "nsamp"]
+    recount = paramdf[item, "recount"]
+    ploidy = paramdf[item, "ploidy"]
+  
+    
+    return(list(current_bias = current_bias, 
+                current_seq = current_seq, 
+                current_od = current_od, 
+                current_allele = current_allele, 
+                nsamp = nsamp, 
+                recount = recount, 
+                ploidy = ploidy))
+  
+}
+
+```
+
+**Simulate the item value**
+```{r}
+item = sample(1:nrow(paramdf), 1)
+
+item
+```
+
+**Create a list based on the simulation**
+```{r}
+sim_list = simulate(item)
+
+sim_list
+```
+
+**Use the values from the simulations**
+```{r}
+seq = sim_list$current_seq
+bias = sim_list$current_bias
+od = sim_list$current_od
+ploidy = sim_list$ploidy
+recount = sim_list$recount
+nsamp = sim_list$nsamp
+allele_freq = sim_list$current_allele
+```
+
+**Simulate genovec using rgeno**
+```{r}
+genovec <- rgeno(n           = nsamp,
+                 ploidy      = ploidy,
+                 model       = "hw",
+                 allele_freq = allele_freq)
+
+genovec
+```
+
+**Simulate sizevec using recount**
+```{r}
+sizevec = rep(sim_list$recount, sim_list$nsamp)
+
+sizevec
+```
+
+**Simulate refvec**
+```{r}
+refvec <- rflexdog(sizevec = sizevec,
+                   geno    = genovec,
+                   ploidy  = ploidy,
+                   seq     = seq,
+                   bias    = bias,
+                   od      = od)
+
+refvec
+```
+
+**Write the standog function**
+```{r}
+standog = function(refvec, sizevec, ploidy) {
+  vbout <- rstan::vb(object = vbmodel, data = list(K = ploidy, N = nsamp, x = refvec, n = sizevec))
+  
+  postprobmat <- lgeno(vbout)
+
+  stan_geno <- get_maxgeno(postprobmat)
+  
+  return(list(postprobmat = postprobmat, geno = stan_geno))
+  
+}
+```
+
+**Simulate results from standog**
+```{r}
+sout = standog(refvec = refvec, sizevec = sizevec, ploidy = ploidy)
+```
+
+**Simulate results from updog**
+```{r}
+uout <- flexdog(refvec = refvec, sizevec = sizevec, ploidy = ploidy, model = "hw")
+```
+
+**Extract simulated genotypes from updog and standog**
+```{r}
+updog_geno = uout$geno
+standog_geno = sout$geno
+```
+
+**Calculate the misclassification error for stan**
+```{r}
+stan_classification_error = mean(genovec != standog_geno)
+
+stan_classification_error
+```
+
+**Calculate the misclassification error for updog**
+```{r}
+updog_classification_error = mean(genovec != updog_geno)
+
+updog_classification_error
+```
+
+**Difference between updog and standog**
+```{r}
+mean(standog_geno != updog_geno)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
